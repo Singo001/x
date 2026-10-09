@@ -1,0 +1,9 @@
+<!doctype html><html lang="da"><head><meta charset="utf-8"><title>Ordklar · test af tekstfelter</title>
+<style>body{font:16px/1.7 system-ui;max-width:850px;margin:40px auto;background:#f7f8f3;color:#253c30}textarea,input,[contenteditable]{box-sizing:border-box;padding:16px;border:1px solid #d5dfcf;background:white;border-radius:10px;font:18px/1.7 system-ui;width:100%;margin:10px 0 30px}textarea{height:140px}output{display:block;color:#61715c;font-size:12px}h1{font-size:28px}h2{font-size:17px}#editable{min-height:130px}.narrow{max-width:310px}iframe{width:100%;height:240px;border:1px solid #d5dfcf}</style></head>
+<body><h1>En lille hjælp, mens du skriver.</h1><h2>Almindeligt tekstfelt</h2><textarea id="textarea" aria-label="Tekstfelt"></textarea><output id="textarea-state"></output>
+<h2>Editor med linjeskift og formatering</h2><div id="editable" contenteditable="true" role="textbox" aria-label="Editor"></div><output id="editable-state"></output>
+<h2>Kontrollerede React-felter</h2><div id="react-root"></div>
+<h2>Input</h2><input id="input" type="text"><input id="password" type="password"><textarea id="readonly" readonly>stavefjel</textarea>
+<h2>Smalt, rullende tekstfelt</h2><textarea id="wrapped" class="narrow"></textarea>
+<div id="shadow-root"></div><div id="frame-root"></div>
+<script src="fixture.js"></script></body></html>

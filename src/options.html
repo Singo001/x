@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="da"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Din ordliste · Ordklar</title><link rel="stylesheet" href="ui.css"></head>
+<body class="options">
+  <header class="topbar row"><div class="brand"><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M17.7 6.6A7.5 7.5 0 1 0 19 14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="m10 10 3 3 7-8" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>ordklar</div><span class="small">Dit sprog. Dine ord.</span></header>
+  <main class="layout">
+    <aside class="sidebar">
+      <span class="eyebrow">Skriv med ro</span><h1>Ord, der<br>er dine.</h1>
+      <p class="description">Fagudtryk, navne og nye idéer hører også til i ordbogen. Fortæl Ordklar, hvilke ord du bruger.</p>
+      <section class="card" aria-label="Korrekturindstillinger">
+        <h2>Dit skrivesprog</h2><label for="language" class="sr-label" hidden>Vælg sprog</label><select id="language" aria-label="Vælg sprog"><option value="da">Dansk</option><option value="en">English (US)</option></select>
+        <div class="row"><label for="enabled">Korrektur</label><label class="toggle"><input id="enabled" type="checkbox" checked><span></span></label></div>
+        <div class="row setting-row"><label for="grammar">Enkle grammatikregler</label><label class="toggle"><input id="grammar" type="checkbox" checked><span></span></label></div>
+      </section>
+      <div class="howto"><h3>Små markeringer. Nemme rettelser.</h3><p><span class="sample-wrong">Stavfejl</span> får en rød markering.<br><span class="sample-grammar">Grammatik</span> får en lilla markering.</p><p>Hold musen over teksten, og vælg et forslag. Eller brug <strong>Alt + Shift + O</strong> for det første forslag i dit tekstfelt.</p><p>Korrekturen tjekker dansk eller engelsk. Grammatikreglerne finder almindelige fejl; de dækker ikke alle nuancer i sproget.</p></div>
+    </aside>
+    <section>
+      <div class="content-heading row"><h2>Din personlige ordliste</h2><span class="count" id="count">0 termer</span></div>
+      <section class="card list-card">
+        <form id="add-form"><label class="form-label" for="new-term">Tilføj et ord eller en term</label><div class="add-form"><input class="text-input" id="new-term" placeholder="Fx DeFi, HODL eller dit firmanavn" maxlength="100" required autocomplete="off"><button class="button primary" type="submit">Tilføj <span aria-hidden="true">+</span></button></div></form>
+        <p class="notice">Gemte termer accepteres på begge sprog.</p>
+        <div class="list-divider"></div>
+        <div class="row list-tools"><input class="text-input" id="search" type="search" placeholder="Søg i dine termer…" aria-label="Søg i ordlisten"><button class="text-button" id="export" type="button">Eksportér ↓</button></div>
+        <div class="terms" id="terms" aria-label="Gemte termer"></div>
+        <p class="feedback" id="feedback" role="status" aria-live="polite"></p>
+      </section>
+      <section class="card import-card">
+        <h3>Tag dine ord med</h3><p class="notice">Importer en eksisterende ordliste, eller start med vores kryptotermer.</p>
+        <input id="file" type="file" accept=".txt,.csv,.json" hidden>
+        <button class="dropzone" id="dropzone" type="button"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 16V3m0 0L7 8m5-5 5 5M4 15v5a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5" stroke="#65825c" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><div><strong>Vælg en fil, eller træk den hertil</strong><span>TXT, CSV eller JSON · højst 2 MB</span></div></button>
+        <div class="import-footer"><p class="notice">Bitcoin, Ethereum, DeFi og flere.<br>Du kan altid fjerne termerne igen.</p><button class="button soft" id="crypto" type="button">Tilføj kryptotermer +</button></div>
+      </section>
+      <details class="card playground"><summary>Prøv korrekturen her</summary><p class="notice">Extensionen må ikke indsætte markeringer på Chromes egne sider. Her kan du teste den samme lokale motor.</p><textarea id="demo" aria-label="Prøv korrektur" placeholder="Fx: Jeg er i tvivl om mit grammatik. Det er en stavefjel."></textarea><button class="button" id="check-demo" type="button">Kontrollér tekst</button><div class="demo-output" id="demo-output" aria-live="polite"></div></details>
+      <div class="footer-note"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z" stroke="#758075" stroke-width="1.6"/><path d="m8 12 3 3 5-6" stroke="#758075" stroke-width="1.6"/></svg><p>Din tekst og ordliste behandles lokalt. Ingen konto, ingen tekst på en server.<br>Ordklar arbejder i det tekstfelt, du skriver i, og tjekker op til 12.000 tegn.</p></div>
+    </section>
+  </main><script src="options.js"></script>
+</body></html>
