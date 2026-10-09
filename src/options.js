@@ -1,4 +1,4 @@
-import { readSettings, cleanTerms, normalizeTerm, parseImport, CRYPTO_TERMS } from './settings.js';
+import { readSettings, cleanTerms, normalizeTerm, parseImport, replacementLabel, CRYPTO_TERMS } from './settings.js';
 
 const $ = selector => document.querySelector(selector);
 let settings;
@@ -48,7 +48,11 @@ async function add(terms) {
   feedback(added ? `${added} ${added === 1 ? 'ny term er' : 'nye termer er'} gemt.` : 'Disse termer er allerede i ordlisten.');
 }
 
-$('#add-form').addEventListener('submit', event => { event.preventDefault(); enqueue(async () => { await add([$('#new-term').value]); $('#new-term').value = ''; $('#new-term').focus(); }); });
+$('#add-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const term = $('#new-term').value;
+  enqueue(async () => { await add([term]); if ($('#new-term').value === term) $('#new-term').value = ''; $('#new-term').focus(); });
+});
 $('#search').addEventListener('input', () => renderTerms());
 $('#crypto').addEventListener('click', () => enqueue(() => add(CRYPTO_TERMS)));
 for (const name of ['language', 'enabled', 'grammar']) $(`#${name}`).addEventListener('change', () => {
@@ -75,15 +79,18 @@ $('#export').addEventListener('click', async () => {
 });
 
 let demoRevision = 0;
-$('#demo').addEventListener('input', () => { demoRevision++; $('#demo-output').replaceChildren(); });
+function invalidateDemo() { demoRevision++; $('#demo-output').replaceChildren(); }
+$('#demo').addEventListener('input', invalidateDemo);
 $('#check-demo').addEventListener('click', async () => {
   const text = $('#demo').value, current = ++demoRevision;
   $('#demo-output').textContent = 'Kontrollerer…';
   try {
     const result = await message({ type: 'CHECK', text });
     if (current !== demoRevision) return;
+    const activeSettings = await readSettings();
+    if (current !== demoRevision) return;
     $('#demo-output').replaceChildren();
-    if (!(await readSettings()).enabled) { $('#demo-output').textContent = 'Slå korrektur til i indstillingerne for at kontrollere teksten.'; return; }
+    if (!activeSettings.enabled) { $('#demo-output').textContent = 'Slå korrektur til i indstillingerne for at kontrollere teksten.'; return; }
     if (!result.matches.length) $('#demo-output').textContent = 'Ingen forslag til denne tekst.';
     for (const match of result.matches) {
       const row = document.createElement('div'); row.className = 'demo-result';
@@ -91,7 +98,7 @@ $('#check-demo').addEventListener('click', async () => {
       const replacements = match.kind === 'spelling' ? (await message({ type: 'SUGGEST', word: match.word })).replacements : match.replacements;
       if (current !== demoRevision) return;
       for (const replacement of replacements) {
-        const button = document.createElement('button'); button.type = 'button'; button.className = 'button soft'; button.textContent = replacement.trim() || 'Ét mellemrum';
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'button soft'; button.textContent = replacementLabel(replacement);
         button.addEventListener('click', () => {
           if ($('#demo').value !== text) { $('#demo-output').replaceChildren(); return; }
           $('#demo').value = text.slice(0, match.offset) + replacement + text.slice(match.offset + match.length);
@@ -103,5 +110,7 @@ $('#check-demo').addEventListener('click', async () => {
     if (result.truncated) $('#demo-output').append('Kun de første 12.000 tegn er kontrolleret.');
   } catch (error) { if (current === demoRevision) $('#demo-output').textContent = error.message; }
 });
-chrome.storage.onChanged.addListener((_changes, area) => { if (area === 'local') refresh().catch(error => feedback(error.message, true)); });
+chrome.storage.onChanged.addListener((_changes, area) => {
+  if (area === 'local') { invalidateDemo(); refresh().catch(error => feedback(error.message, true)); }
+});
 refresh().catch(error => feedback(error.message, true));

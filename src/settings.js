@@ -23,6 +23,7 @@ export function parseImport(text, filename = '') {
   if (text.length > 2_000_000) throw new Error('Filen er for stor. Vælg en fil under 2 MB.');
   const source = text.replace(/^\uFEFF/u, '').trim();
   if (!source) return [];
+  if (/\.txt$/i.test(filename)) return cleanTerms(source.split(/\r\n|[\r\n]/u));
   if (/\.json$/i.test(filename) || source.startsWith('[')) {
     let parsed;
     try { parsed = JSON.parse(source); } catch { throw new Error('JSON-filen er ikke gyldig. Brug en liste som ["DeFi", "HODL"].'); }
@@ -42,6 +43,10 @@ export function parseImport(text, filename = '') {
   if (quoted) throw new Error('CSV-filen har et anførselstegn, der ikke er afsluttet.');
   terms.push(term);
   return cleanTerms(terms);
+}
+
+export function replacementLabel(value) {
+  return value === '' ? 'Fjern mellemrum' : value.trim() || 'Ét mellemrum';
 }
 
 export async function readSettings() {

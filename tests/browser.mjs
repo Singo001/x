@@ -128,6 +128,89 @@ try {
     assert.equal(await page.locator('#input').inputValue(), 'stavefejl');
   });
 
+  await check('content-box og sidens CSS flytter ikke tekstmarkeringerne', async () => {
+    const expected = await page.evaluate(() => {
+      const field = document.querySelector('#textarea');
+      field.style.cssText = 'box-sizing:content-box;width:140px;height:140px;font:18px/1.7 monospace;padding:16px;border:1px solid #ddd;';
+      field.value = 'Jeg skriver en stavefjel.'; field.focus(); field.dispatchEvent(new InputEvent('input',{bubbles:true}));
+      const style = document.createElement('style'); style.id='mirror-test-style'; style.textContent='html > div:not([data-ordklar]) { margin:80px !important; }'; document.head.append(style);
+      const rect = field.getBoundingClientRect();
+      const reference = document.createElement('pre'); reference.id='mirror-reference';
+      reference.style.cssText=`position:fixed;left:${rect.left}px;top:${rect.top}px;box-sizing:content-box;width:140px;height:140px;font:18px/1.7 monospace;padding:16px;border:1px solid transparent;margin:0;white-space:pre-wrap;overflow-wrap:break-word;visibility:hidden;`;
+      const text = document.createTextNode(field.value); reference.append(text); document.body.append(reference);
+      const range = document.createRange(); range.setStart(text,15); range.setEnd(text,24);
+      const word = range.getBoundingClientRect(); reference.remove();
+      return {x:word.x,y:word.bottom-2};
+    });
+    try {
+      await waitMark(page,'stavefjel');
+      const actual=await page.locator('.mark[data-word="stavefjel"]').first().boundingBox();
+      assert.ok(Math.abs(actual.x-expected.x)<1,`x ${actual.x} vs ${expected.x}`);
+      assert.ok(Math.abs(actual.y-expected.y)<1,`y ${actual.y} vs ${expected.y}`);
+      await choose(page,'stavefjel','stavefejl');
+      assert.equal(await page.locator('#textarea').inputValue(),'Jeg skriver en stavefejl.');
+    } finally { await page.evaluate(() => {document.querySelector('#textarea').style.cssText='';document.querySelector('#mirror-test-style')?.remove();}); }
+  });
+
+  await check('et højt input får markeringen ved den lodret centrerede tekst',async () => {
+    await page.locator('#input').evaluate(field => {field.style.cssText='height:90px;padding:10px;font:18px monospace;line-height:normal;';});
+    try {
+      await page.locator('#input').fill('stavefjel'); await waitMark(page,'stavefjel');
+      const field=await page.locator('#input').boundingBox();
+      const mark=await page.locator('.mark[data-word="stavefjel"]').boundingBox();
+      assert.ok(mark.y>field.y+field.height/2 && mark.y<field.y+field.height/2+18);
+      await choose(page,'stavefjel','stavefejl');
+      assert.equal(await page.locator('#input').inputValue(),'stavefejl');
+    } finally {await page.locator('#input').evaluate(field => {field.style.cssText='';});}
+  });
+
+  await check('aktive felter kontrolleres ikke efter skift til password eller readonly',async () => {
+    const field=page.locator('#input');
+    try {
+      await field.fill('stavefjel'); await waitMark(page,'stavefjel');
+      await field.evaluate(node => {node.type='password';});
+      await page.waitForFunction(() => !document.querySelector('[data-ordklar]').shadowRoot.querySelector('.mark'),null,{timeout:5000});
+      await field.evaluate(node => {node.type='text';});
+      await field.blur(); await field.focus(); await waitMark(page,'stavefjel');
+      await field.evaluate(node => {node.readOnly=true;});
+      await page.waitForFunction(() => !document.querySelector('[data-ordklar]').shadowRoot.querySelector('.mark'),null,{timeout:5000});
+    } finally {await field.evaluate(node => {node.type='text';node.readOnly=false;});}
+  });
+
+  await check('en rettelse overskrider ikke tekstfeltets maxlength',async () => {
+    await page.locator('#input').evaluate(node => {node.maxLength=8;});
+    try {
+      await page.locator('#input').fill('gramatik');
+      await choose(page,'gramatik','grammatik');
+      assert.equal(await page.locator('#input').inputValue(),'gramatik');
+      assert.match(await page.locator('.tip .message').textContent(),/maksimale længde på 8 tegn/u);
+    } finally {await page.locator('#input').evaluate(node => node.removeAttribute('maxlength'));}
+  });
+
+  await check('IME-indtastning genviser ikke gamle forslag ved resize',async () => {
+    await page.locator('#textarea').fill('stavefjel'); await waitMark(page,'stavefjel');
+    await page.locator('#textarea').evaluate(async node => {
+      node.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+      window.dispatchEvent(new Event('resize'));
+      await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
+    });
+    assert.equal(await page.locator('.mark').count(),0);
+    await page.locator('#textarea').evaluate(node => node.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));
+    await waitMark(page,'stavefjel');
+  });
+
+  await check('ignorerede forslag opdaterer status, og tegnsætning kan rettes separat',async () => {
+    await page.locator('#textarea').fill('stavefjel'); await hoverWord(page,'stavefjel');
+    await page.locator('.tip').getByRole('button',{name:'Ignorer her',exact:true}).click();
+    assert.equal(await page.locator('.status').textContent(),'✓ Ingen forslag');
+    // Changing focus resets this field's ignored suggestions.
+    await page.locator('#input').focus(); await page.locator('#textarea').fill('stavefjel !');
+    await choose(page,' ','Fjern mellemrum');
+    assert.equal(await page.locator('#textarea').inputValue(),'stavefjel!');
+    await choose(page,'stavefjel','stavefejl');
+    assert.equal(await page.locator('#textarea').inputValue(),'stavefejl!');
+  });
+
   await check('password- og skrivebeskyttede felter aktiverer ikke korrektur', async () => {
     await page.locator('#password').fill('stavefjel');
     assert.equal(await page.locator('.mark').count(), 0);
@@ -202,6 +285,19 @@ try {
     await options.evaluate(async () => { for (const term of ['ParallelAlpha','ParallelBeta']) await chrome.runtime.sendMessage({type:'REMOVE_TERM',term}); });
   });
 
+  await check('en sendt term gemmes, selv om brugeren allerede skriver den næste',async () => {
+    await options.evaluate(() => {
+      const field=document.querySelector('#new-term');
+      field.value='SubmittedTerm'; document.querySelector('#add-form').requestSubmit();
+      field.value='NextTerm';
+    });
+    await options.getByRole('button',{name:'Fjern SubmittedTerm',exact:true}).waitFor();
+    assert.equal(await options.locator('#new-term').inputValue(),'NextTerm');
+    assert.equal(await options.getByRole('button',{name:'Fjern NextTerm',exact:true}).count(),0);
+    await options.evaluate(() => chrome.runtime.sendMessage({type:'REMOVE_TERM',term:'SubmittedTerm'}));
+    await options.locator('#new-term').fill('');
+  });
+
   await check('kryptopakke, sletning og søgning virker', async () => {
     await options.locator('#crypto').click();
     await options.getByRole('button', {name: 'Fjern Bitcoin', exact:true}).waitFor();
@@ -269,6 +365,10 @@ try {
     await options.locator('#demo-output').getByRole('button',{name:'min grammatik',exact:true}).waitFor();
     await options.locator('#demo-output').getByRole('button',{name:'min grammatik',exact:true}).click();
     assert.equal(await options.locator('#demo').inputValue(),'min grammatik stavefjel');
+    await options.locator('#demo-output').getByRole('button',{name:'stavefejl',exact:true}).waitFor();
+    await setSettings({language:'en'});
+    await options.waitForFunction(() => document.querySelector('#demo-output').textContent === '');
+    await setSettings({language:'da'});
   });
 
   await check('ingen JavaScript-fejl eller eksterne tekstanmodninger', async () => {

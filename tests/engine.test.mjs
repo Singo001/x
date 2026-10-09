@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createSpeller, checkText, suggest, MAX_TEXT } from '../src/engine.js';
+import { createSpeller, checkText, suggest, acceptedRanges, MAX_TEXT } from '../src/engine.js';
 import { DEFAULTS, cleanTerms, parseImport, CRYPTO_TERMS } from '../src/settings.js';
 import { grammarMatches } from '../src/grammar.js';
 
@@ -59,7 +59,9 @@ test('grammatikregler retter mellemrum og bevarer store begyndelsesbogstaver', (
   assert.ok(matches.some(m => m.replacements.includes('Min grammatik')));
   const space = matches.find(m => m.rule === 'double-space');
   assert.equal(text.slice(space.offset, space.offset + space.length), '  ');
-  assert.ok(matches.some(m => m.replacements.includes('d!')));
+  const punctuation = matches.find(m => m.rule === 'space-before-punctuation');
+  assert.equal(text.slice(punctuation.offset, punctuation.offset + punctuation.length), ' ');
+  assert.deepEqual(punctuation.replacements, ['']);
 });
 test('import af TXT, CSV og JSON kan eksporteres uden datatab', () => {
   assert.deepEqual(parseImport('DeFi\nHODL\nDeFi\n'), ['DeFi', 'HODL']);
@@ -76,4 +78,48 @@ test('ugyldige importer afvises uden at ændre den eksisterende ordliste', () =>
 });
 test('meget lang tekst begrænses eksplicit', () => {
   assert.deepEqual(check(' '.repeat(MAX_TEXT) + 'stavefjel'), []);
+});
+
+test('engelske spørgsmål med modalverber får ikke forkert nutidsendelse', () => {
+  for (const text of ['Does she have a wallet?', 'Can he go home?', 'Why would it work?', 'Did she do that?', "Doesn't she have a wallet?", 'Can’t he go home?', "Won't it work?"]) {
+    assert.deepEqual(grammarMatches(text, 'en'), [], text);
+  }
+  assert.ok(grammarMatches('She have a wallet.', 'en').some(m => m.replacements.includes('She has')));
+  assert.ok(grammarMatches('A apple.', 'en').some(m => m.replacements.includes('An apple')));
+});
+test('danske rettelser bevarer bogstavstørrelse og ændrer ikke på tværs af afsnit', () => {
+  assert.ok(grammarMatches('Jeg er NØD til at gå.', 'da').some(m => m.replacements.includes('Jeg er NØDT til')));
+  assert.ok(grammarMatches('MIT grammatik', 'da').some(m => m.replacements.includes('MIN grammatik')));
+  assert.deepEqual(grammarMatches('mit\ngrammatik', 'da'), []);
+  assert.ok(grammarMatches('mit\u00a0grammatik', 'da').some(m => m.replacements.includes('min\u00a0grammatik')));
+});
+test('egne termer beholder offsets efter Unicode-casefold og normalisering', () => {
+  const text = 'İ Zorbquux Cafe\u0301';
+  const ranges = acceptedRanges(text, ['Zorbquux', 'Café']);
+  assert.deepEqual(ranges.map(m => text.slice(m.offset, m.offset + m.length)), ['Zorbquux', 'Cafe\u0301']);
+  assert.deepEqual(check(text, { terms: ['Zorbquux', 'Café'] }), []);
+});
+test('en gemt term godkender ikke en hel ukendt sammensætning', () => {
+  const matches = check('Zorbquux-speling', { terms: ['Zorbquux'] });
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].word, 'Zorbquux-speling');
+});
+test('afskæring ved 12.000 tegn opfinder ikke fejl i halve ord', () => {
+  assert.deepEqual(check(' '.repeat(MAX_TEXT - 3) + 'grammatik'), []);
+  assert.deepEqual(check(' '.repeat(MAX_TEXT - 3) + 'abc123'), []);
+  assert.deepEqual(check(' '.repeat(MAX_TEXT - 3) + 'abc_value'), []);
+});
+test('mange sene grammatikfejl skjuler ikke de tidligste stavefejl', () => {
+  const text = 'stavefjel stavefjeel stavefjell. ' + 'mit grammatik. '.repeat(110);
+  const matches = check(text);
+  assert.equal(matches.length, 100);
+  assert.deepEqual(matches.slice(0, 3).map(m => m.word), ['stavefjel', 'stavefjeel', 'stavefjell']);
+});
+test('TXT behandler en hel linje som en term, også med komma og anførselstegn', () => {
+  assert.deepEqual(parseImport('Company, Inc\n"special term"\n[Alpha]', 'terms.txt'), ['Company, Inc', '"special term"', '[Alpha]']);
+});
+test('fjernelse af mellemrum før tegn skjuler ikke en nærliggende stavefejl', () => {
+  const matches = check('stavefjel !');
+  assert.ok(matches.some(m => m.word === 'stavefjel'));
+  assert.ok(matches.some(m => m.rule === 'space-before-punctuation' && m.replacements[0] === ''));
 });

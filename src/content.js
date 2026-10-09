@@ -1,5 +1,5 @@
-import { readSettings } from './settings.js';
-import { findEditor, snapshot, rangeFor, replaceText, mirrorFor } from './editor.js';
+import { readSettings, replacementLabel } from './settings.js';
+import { findEditor, isEligibleEditor, snapshot, rangeFor, replacementProblem, replaceText, mirrorFor } from './editor.js';
 
 const host = document.createElement('div');
 host.dataset.ordklar = 'overlay';
@@ -42,9 +42,15 @@ document.documentElement.append(host);
 let settings = { enabled: true };
 let editor = null, data = null, matches = [], hitboxes = [], timer, layoutFrame, hideTimer, revision = 0, displayed = null;
 let composing = false;
+let lastResult = null;
 const ignored = new Set();
 const resize = new ResizeObserver(() => scheduleLayout());
-const mutation = new MutationObserver(() => scheduleCheck());
+const mutation = new MutationObserver(records => {
+  // Cosmetic changes should reposition suggestions rather than invalidate
+  // them. Pages (and screenshot tools) also change caret styling on focus.
+  if (records.every(record => record.type === 'attributes' && ['class', 'style'].includes(record.attributeName))) scheduleLayout();
+  else scheduleCheck();
+});
 
 async function send(message) {
   const result = await chrome.runtime.sendMessage(message);
@@ -52,7 +58,7 @@ async function send(message) {
   return result;
 }
 
-function closeTip() { tip.hidden = true; displayed = null; clearTimeout(hideTimer); }
+function closeTip() { tip.hidden = true; displayed = null; clearTimeout(hideTimer); hideTimer = null; }
 function clearMarks() { marks.replaceChildren(); hitboxes = []; closeTip(); }
 
 function activate(next) {
@@ -60,24 +66,27 @@ function activate(next) {
   revision++;
   clearTimeout(timer);
   mutation.disconnect(); resize.disconnect();
-  editor = next; matches = []; data = null; ignored.clear(); clearMarks(); status.hidden = true;
+  editor = next; matches = []; data = null; composing = false; ignored.clear(); clearMarks(); status.hidden = true;
   if (!next) return;
   resize.observe(next);
-  if (!('value' in next)) mutation.observe(next, { subtree: true, childList: true, characterData: true });
+  const rich = !('value' in next);
+  mutation.observe(next, { attributes: true, attributeFilter: ['type', 'readonly', 'disabled', 'contenteditable', 'data-ordklar-ignore', 'hidden', 'class', 'style'], subtree: rich, childList: rich, characterData: rich });
   scheduleCheck(0);
 }
 
 function scheduleCheck(delay = 450) {
   revision++;
   clearTimeout(timer);
+  matches = []; data = null; lastResult = null;
   clearMarks();
   status.hidden = true;
+  if (editor && !isEligibleEditor(editor)) { activate(null); return; }
   if (!settings.enabled || !editor?.isConnected || composing) return;
   timer = setTimeout(check, delay);
 }
 
 async function check() {
-  if (!editor?.isConnected || !settings.enabled) return;
+  if (!editor?.isConnected || !isEligibleEditor(editor) || !settings.enabled || composing) return;
   const current = revision, target = editor;
   const next = snapshot(target);
   if (!next.text.trim()) { matches = []; data = next; status.hidden = true; return; }
@@ -87,7 +96,8 @@ async function check() {
     if (current !== revision || editor !== target || snapshot(target).text !== next.text) return;
     data = next;
     matches = result.matches.filter(match => !ignored.has(`${match.rule}:${next.text.slice(match.offset, match.offset + match.length)}`));
-    status.textContent = result.truncated ? 'Kun de første 12.000 tegn' : matches.length ? `${matches.length} forslag · ${result.language === 'da' ? 'DA' : 'EN'}` : '✓ Ingen forslag';
+    lastResult = result;
+    updateStatus();
     status.hidden = false;
     layout();
   } catch (error) {
@@ -96,10 +106,16 @@ async function check() {
   }
 }
 
+function updateStatus() {
+  if (!lastResult) return;
+  status.textContent = lastResult.truncated ? 'Kun de første 12.000 tegn' : matches.length ? `${matches.length} forslag · ${lastResult.language === 'da' ? 'DA' : 'EN'}` : '✓ Ingen forslag';
+}
+
 function placeStatus() {
   if (!editor?.isConnected) { status.hidden = true; return; }
   const rect = editor.getBoundingClientRect();
-  if (rect.bottom < 0 || rect.top > innerHeight) { status.hidden = true; return; }
+  if (!rect.width || !rect.height || rect.bottom < 0 || rect.top > innerHeight) { status.hidden = true; return; }
+  if (data && settings.enabled && !composing && isEligibleEditor(editor)) status.hidden = false;
   status.style.left = `${Math.max(8, Math.min(innerWidth - 185, rect.right - 170))}px`;
   status.style.top = `${Math.max(4, Math.min(innerHeight - 27, rect.bottom + 5))}px`;
 }
@@ -113,10 +129,10 @@ function layout() {
   marks.replaceChildren(); hitboxes = [];
   if (!editor?.isConnected) { activate(null); return; }
   placeStatus();
-  if (!data || !settings.enabled || data.text !== snapshot(editor).text) return;
+  if (!data || !settings.enabled || composing || !isEligibleEditor(editor) || data.text !== snapshot(editor).text) return;
   const bounds = editor.getBoundingClientRect();
-  if (bounds.width === 0 || bounds.height === 0) return;
-  const mirror = 'value' in editor ? mirrorFor(editor, data) : null;
+  if (bounds.width === 0 || bounds.height === 0) { closeTip(); return; }
+  const mirror = 'value' in editor ? mirrorFor(editor, data, root) : null;
   try {
     for (const match of matches) {
       let range;
@@ -178,7 +194,7 @@ async function showTip(box) {
   footer.append(button('Ignorer her', () => {
     ignored.add(`${match.rule}:${word.textContent}`);
     matches = matches.filter(item => !(item.rule === match.rule && currentData.text.slice(item.offset, item.offset + item.length) === word.textContent));
-    closeTip(); layout();
+    closeTip(); updateStatus(); layout();
   }, 'secondary'));
   if (match.kind === 'spelling') footer.append(button('+ Gem i ordliste', async () => {
     try { await send({ type: 'ADD_TERMS', terms: [word.textContent] }); closeTip(); scheduleCheck(0); }
@@ -188,7 +204,9 @@ async function showTip(box) {
   function render(replacements) {
     if (displayed !== match || current !== revision) return;
     suggestions.replaceChildren();
-    for (const replacement of replacements) suggestions.append(button(replacement.trim() || 'Ét mellemrum', () => {
+    for (const replacement of replacements) suggestions.append(button(replacementLabel(replacement), () => {
+      const problem = replacementProblem(editor, currentData, match, replacement);
+      if (problem) { message.textContent = problem; positionTip(box); return; }
       if (replaceText(editor, currentData, match, replacement)) { closeTip(); scheduleCheck(100); }
       else { message.textContent = 'Teksten blev ændret. Kontrollerer igen…'; scheduleCheck(0); }
     }));
@@ -209,6 +227,7 @@ document.addEventListener('focusin', event => {
 document.addEventListener('input', event => {
   const target = findEditor(event);
   if (target) { activate(target); scheduleCheck(); }
+  else if (event.composedPath().includes(editor)) activate(null);
 }, true);
 document.addEventListener('compositionstart', () => { composing = true; scheduleCheck(); }, true);
 document.addEventListener('compositionend', () => { composing = false; scheduleCheck(); }, true);

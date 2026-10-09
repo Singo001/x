@@ -1,13 +1,21 @@
 const BLOCKS = new Set(['DIV', 'P', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'PRE']);
 
+export function isEligibleEditor(node) {
+  if (!(node instanceof HTMLElement) || node.closest('[data-ordklar-ignore]')) return false;
+  if (node instanceof HTMLTextAreaElement) return !node.disabled && !node.readOnly;
+  if (node instanceof HTMLInputElement) return ['text', 'search'].includes(node.type) && !node.disabled && !node.readOnly;
+  return node.isContentEditable && !node.closest('[contenteditable="false"]');
+}
+
 export function findEditor(event) {
+  if (event.composedPath().some(node => node instanceof HTMLElement && node.closest('[data-ordklar-ignore]'))) return null;
   for (const node of event.composedPath()) {
     if (!(node instanceof HTMLElement)) continue;
-    if (node.closest('[data-ordklar-ignore], [contenteditable="false"]')) return null;
-    if (node instanceof HTMLTextAreaElement) return node.disabled || node.readOnly ? null : node;
+    if (node instanceof HTMLTextAreaElement) return isEligibleEditor(node) ? node : null;
     if (node instanceof HTMLInputElement) {
-      return ['text', 'search'].includes(node.type) && !node.disabled && !node.readOnly ? node : null;
+      return isEligibleEditor(node) ? node : null;
     }
+    if (node.closest('[contenteditable="false"]')) return null;
     if (node.isContentEditable) {
       let root = node;
       while (root.parentElement?.isContentEditable) root = root.parentElement;
@@ -53,11 +61,19 @@ export function rangeFor(data, offset, length) {
   return range;
 }
 
+export function replacementProblem(editor, data, match, replacement) {
+  if (editor && 'value' in editor && editor.maxLength >= 0 && data.text.length - match.length + replacement.length > editor.maxLength) {
+    return `Rettelsen overskrider feltets maksimale længde på ${editor.maxLength} tegn.`;
+  }
+  return null;
+}
+
 export function replaceText(editor, data, match, replacement) {
-  if (!editor.isConnected || snapshot(editor).text !== data.text) return false;
+  if (!editor?.isConnected || !isEligibleEditor(editor) || snapshot(editor).text !== data.text) return false;
   editor.focus({ preventScroll: true });
   if ('value' in editor) {
     const value = data.text.slice(0, match.offset) + replacement + data.text.slice(match.offset + match.length);
+    if (replacementProblem(editor, data, match, replacement)) return false;
     // Use the native setter so React's value tracker sees the following input event.
     const prototype = editor instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(prototype, 'value').set.call(editor, value);
@@ -75,18 +91,29 @@ export function replaceText(editor, data, match, replacement) {
   return changed && snapshot(editor).text === data.text.slice(0, match.offset) + replacement + data.text.slice(match.offset + match.length);
 }
 
-export function mirrorFor(editor, data) {
+export function mirrorFor(editor, data, container = document.documentElement) {
   const mirror = document.createElement('div');
+  mirror.style.all = 'initial';
   const style = getComputedStyle(editor);
   const rect = editor.getBoundingClientRect();
   for (const name of ['box-sizing', 'font-family', 'font-size', 'font-weight', 'font-style', 'font-variant', 'line-height', 'letter-spacing', 'word-spacing', 'text-align', 'text-indent', 'text-transform', 'direction', 'tab-size', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width']) mirror.style.setProperty(name, style.getPropertyValue(name));
-  Object.assign(mirror.style, { position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`, visibility: 'hidden', pointerEvents: 'none', overflow: 'hidden', borderStyle: 'solid', whiteSpace: editor instanceof HTMLInputElement || editor.wrap === 'off' ? 'pre' : 'pre-wrap', overflowWrap: 'break-word' });
+  // BoundingClientRect includes borders and padding even for content-box fields.
+  Object.assign(mirror.style, { boxSizing: 'border-box', position: 'fixed', margin: '0', left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`, visibility: 'hidden', pointerEvents: 'none', overflow: 'hidden', borderStyle: 'solid', whiteSpace: editor instanceof HTMLInputElement || editor.wrap === 'off' ? 'pre' : 'pre-wrap', overflowWrap: 'break-word' });
   const text = document.createTextNode(data.text || ' ');
   mirror.append(text);
-  document.documentElement.append(mirror);
+  container.append(mirror);
   // The textarea's vertical scrollbar reduces its line width.
   if (editor instanceof HTMLTextAreaElement) mirror.style.paddingRight = `${parseFloat(style.paddingRight) + Math.max(0, editor.offsetWidth - editor.clientWidth - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth))}px`;
   mirror.scrollTop = editor.scrollTop;
   mirror.scrollLeft = editor.scrollLeft;
+  if (editor instanceof HTMLInputElement) {
+    const range = document.createRange(); range.selectNode(text);
+    const glyphs = range.getBoundingClientRect();
+    const paddingTop = parseFloat(style.paddingTop), paddingBottom = parseFloat(style.paddingBottom);
+    const borderTop = parseFloat(style.borderTopWidth), borderBottom = parseFloat(style.borderBottomWidth);
+    const contentHeight = rect.height - borderTop - borderBottom - paddingTop - paddingBottom;
+    const delta = rect.top + borderTop + paddingTop + (contentHeight - glyphs.height) / 2 - glyphs.top;
+    mirror.style.paddingTop = `${Math.max(0, paddingTop + delta)}px`;
+  }
   return { mirror, text };
 }
